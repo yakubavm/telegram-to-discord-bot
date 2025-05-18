@@ -5,6 +5,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 import discord
 from discord.ext import tasks
 
+# Зчитування токенів і ID з оточення
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -18,8 +19,9 @@ discord_messages_queue = asyncio.Queue()
 
 @discord_client.event
 async def on_ready():
-    print(f'Discord бот запущений як {discord_client.user}')
-    discord_sender.start()
+    print(f"Discord бот запущений як {discord_client.user}")
+    if not discord_sender.is_running():
+        discord_sender.start()
 
 @tasks.loop(seconds=5)
 async def discord_sender():
@@ -27,13 +29,19 @@ async def discord_sender():
     if channel is None:
         print("Discord канал не знайдено!")
         return
+
     while not discord_messages_queue.empty():
         content = await discord_messages_queue.get()
-        await channel.send(content)
+        try:
+            await channel.send(content)
+            print("Повідомлення відправлено у Discord")
+        except Exception as e:
+            print(f"Помилка при відправленні у Discord: {e}")
 
 async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
 
+    # Перевірка, що повідомлення з потрібного Telegram-каналу/чату
     if TELEGRAM_CHANNEL_ID and update.effective_chat.id != TELEGRAM_CHANNEL_ID:
         return
 
@@ -58,23 +66,25 @@ async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_
         file_url = file.file_path
         content += f"🎥 Відео: {file_url}\n"
 
-    await discord_messages_queue.put(content)
+    if content:
+        await discord_messages_queue.put(content)
+        print("Отримано повідомлення з Telegram, додано до черги Discord")
 
 async def main():
+    # Ініціалізація Telegram бота
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_telegram_message))
 
-    # Запускаємо Telegram Application без блокування (асинхронно)
     await app.initialize()
     await app.start()
-    # Запускаємо polling в окремому таску
     polling_task = asyncio.create_task(app.updater.start_polling())
 
-    # Паралельно запускаємо Discord
-    await discord_client.start(DISCORD_TOKEN)
+    # Логін і коннект Discord бота
+    await discord_client.login(DISCORD_TOKEN)
+    discord_task = asyncio.create_task(discord_client.connect())
 
-    # Чекаємо завершення polling_task, якщо буде потрібно (тут поки постійно працює)
-    await polling_task
+    # Чекаємо одночасно завершення обох тасків (будуть працювати вічно)
+    await asyncio.gather(polling_task, discord_task)
 
 if __name__ == "__main__":
     asyncio.run(main())
