@@ -22,11 +22,6 @@ discord_messages_queue = asyncio.Queue()
 @discord_client.event
 async def on_ready():
     print(f'Discord бот запущений як {discord_client.user}')
-    channel = discord_client.get_channel(DISCORD_CHANNEL_ID)
-    if channel is None:
-        print(f"Не вдалося знайти Discord канал з ID: {DISCORD_CHANNEL_ID}")
-    else:
-        print(f"Discord канал для надсилання: {channel.name} (ID: {DISCORD_CHANNEL_ID})")
     discord_sender.start()
 
 @tasks.loop(seconds=5)
@@ -35,18 +30,14 @@ async def discord_sender():
     if channel is None:
         print("Discord канал не знайдено!")
         return
-    if not discord_messages_queue.empty():
+    while not discord_messages_queue.empty():
         content = await discord_messages_queue.get()
-        try:
-            await channel.send(content)
-            print(f"Відправлено в Discord: {content}")
-        except Exception as e:
-            print(f"Помилка відправки в Discord: {e}")
+        await channel.send(content)
 
 async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
 
-    # Фільтр за каналом (якщо заданий)
+    # Перевірка, що повідомлення з потрібного каналу (опціонально)
     if TELEGRAM_CHANNEL_ID and update.effective_chat.id != TELEGRAM_CHANNEL_ID:
         return
 
@@ -71,18 +62,25 @@ async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_
         file_url = file.file_path
         content += f"🎥 Відео: {file_url}\n"
 
-    if content:
-        await discord_messages_queue.put(content)
-        print(f"Повідомлення додано в чергу: {content}")
+    await discord_messages_queue.put(content)
 
 async def main():
+    # Запускаємо Telegram бот
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Додаємо хендлер для всіх типів повідомлень
     app.add_handler(MessageHandler(filters.ALL, handle_telegram_message))
 
+    # Паралельно запускаємо Discord і Telegram боти
     await asyncio.gather(
         discord_client.start(DISCORD_TOKEN),
         app.run_polling()
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
