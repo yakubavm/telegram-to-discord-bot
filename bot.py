@@ -5,18 +5,15 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 import discord
 from discord.ext import tasks
 
-# Завантаження змінних середовища
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID"))  # числовий ID каналу (опціонально)
+TELEGRAM_CHANNEL_ID = int(os.getenv("TELEGRAM_CHANNEL_ID"))
 
-# Ініціалізація Discord клієнта
 intents = discord.Intents.default()
 intents.message_content = True
 discord_client = discord.Client(intents=intents)
 
-# Черга повідомлень для Discord
 discord_messages_queue = asyncio.Queue()
 
 @discord_client.event
@@ -37,7 +34,6 @@ async def discord_sender():
 async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
 
-    # Перевірка, що повідомлення з потрібного каналу (опціонально)
     if TELEGRAM_CHANNEL_ID and update.effective_chat.id != TELEGRAM_CHANNEL_ID:
         return
 
@@ -65,22 +61,20 @@ async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_
     await discord_messages_queue.put(content)
 
 async def main():
-    # Запускаємо Telegram бот
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    # Додаємо хендлер для всіх типів повідомлень
     app.add_handler(MessageHandler(filters.ALL, handle_telegram_message))
 
-    # Паралельно запускаємо Discord і Telegram боти
-    await asyncio.gather(
-        discord_client.start(DISCORD_TOKEN),
-        app.run_polling()
-    )
+    # Запускаємо Telegram Application без блокування (асинхронно)
+    await app.initialize()
+    await app.start()
+    # Запускаємо polling в окремому таску
+    polling_task = asyncio.create_task(app.updater.start_polling())
+
+    # Паралельно запускаємо Discord
+    await discord_client.start(DISCORD_TOKEN)
+
+    # Чекаємо завершення polling_task, якщо буде потрібно (тут поки постійно працює)
+    await polling_task
 
 if __name__ == "__main__":
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    asyncio.run(main())
